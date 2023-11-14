@@ -1,11 +1,12 @@
 [package]
-name = "tik_lab1"
+name = "tik"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bit_buffers = "0.1.2"
 log = "0.4.20"
 termion = "2.0.1"
 strum = "0.25"

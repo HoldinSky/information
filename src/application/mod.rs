@@ -1,4 +1,5 @@
-use crate::menu::menu;
+mod menu;
+use menu::menu;
 
 pub fn start() {
     menu();

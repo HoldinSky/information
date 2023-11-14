@@ -1,24 +1,26 @@
-use std::{env, fs};
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter};
 use std::fs::DirEntry;
-use std::io::{Read, stdin, stdout, Write};
+use std::io::{stdin, stdout, Read, Write};
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
-pub fn take_input() -> Vec<u8> {
+pub fn get_input_from_user() -> Vec<u8> {
     print!("# ");
     stdout().flush().unwrap();
 
     let mut stdin = stdin();
     let mut buffer = Vec::new();
 
-    stdin.read_to_end(&mut buffer).expect("Could not read input");
+    stdin
+        .read_to_end(&mut buffer)
+        .expect("Could not read input");
 
     buffer
 }
 
-pub fn take_line() -> Vec<u8> {
+pub fn get_line_from_user() -> String {
     print!("# ");
     stdout().flush().unwrap();
 
@@ -27,7 +29,7 @@ pub fn take_line() -> Vec<u8> {
 
     stdin.read_line(&mut buffer).expect("Could not read input");
 
-    buffer.into_bytes()
+    buffer
 }
 
 fn get_current_dir() -> Result<PathBuf, Box<dyn Error>> {
@@ -49,7 +51,9 @@ pub struct BadPathError {
 
 impl BadPathError {
     pub fn new(path: &str) -> Self {
-        Self { path: String::from(path) }
+        Self {
+            path: String::from(path),
+        }
     }
 }
 
@@ -60,8 +64,10 @@ impl Display for BadPathError {
 }
 
 pub fn change_dir(new_dir: &str) -> Result<(), BadPathError> {
-    match env::set_current_dir(Path::new(new_dir)
-        .canonicalize().unwrap_or(env::current_dir().unwrap())
+    match env::set_current_dir(
+        Path::new(new_dir)
+            .canonicalize()
+            .unwrap_or(env::current_dir().unwrap()),
     ) {
         Ok(_) => Ok(()),
         Err(_) => Err(BadPathError::new(new_dir)),
