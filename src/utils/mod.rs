@@ -15,7 +15,9 @@ use std::os::unix::ffi::OsStringExt;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 
-pub fn parse_file(file: File) -> ([u64; 256], u64) {
+pub type FileStats = ([u64; 256], u64);
+
+pub fn parse_file(file: &File) -> FileStats {
     let mut reader = FileReader::new();
 
     let mut dictionary: [u64; 256] = [0; 256];
@@ -66,25 +68,30 @@ pub fn pause(message: &str) {
     stdin().events().next();
 }
 
-#[test]
-#[allow(unused_must_use)]
-fn test_directory_change() {
-    clear();
-    print_entries_of_current_dir();
+#[cfg(test)]
+mod tests {
+    use super::{clear, pause, print_entries_of_current_dir, terminal};
 
-    pause("Press any key...");
-    clear();
-    terminal::change_dir("..");
-    print_entries_of_current_dir();
+    #[test]
+    #[allow(unused_must_use)]
+    fn test_directory_change() {
+        clear();
+        print_entries_of_current_dir();
 
-    pause("Press any key...");
-    clear();
-    terminal::change_dir("..");
-    print_entries_of_current_dir();
+        pause("Press any key...");
+        clear();
+        terminal::change_dir("..");
+        print_entries_of_current_dir();
 
-    pause("Press any key...");
-    clear();
-    terminal::change_dir("/opfwe");
-    print_entries_of_current_dir();
-    pause("Press any key...");
+        pause("Press any key...");
+        clear();
+        terminal::change_dir("..");
+        print_entries_of_current_dir();
+
+        pause("Press any key...");
+        clear();
+        terminal::change_dir("/opfwe");
+        print_entries_of_current_dir();
+        pause("Press any key...");
+    }
 }

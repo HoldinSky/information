@@ -71,7 +71,10 @@ fn perform_action_by_option(option: MenuOption) {
     match option {
         MenuOption::StatsByHand => logic::calculate_user_input_stats(),
         MenuOption::StatsFile => logic::calculate_file_stats(),
-        MenuOption::EncodeFile => logic::encode_file(),
+        MenuOption::EncodeFile => match logic::encode_file(None) {
+            Ok(_) => (),
+            Err(err) => println!("{}", err),
+        },
         _ => println!("Cannot process the {:?} option", option),
     };
 }

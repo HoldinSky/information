@@ -1,8 +1,5 @@
 pub fn parse_chunk_for_unique_bytes(dictionary: &mut [u64; 256], buffer: &[u8], counter: &mut u64) {
     for byte in buffer.iter().copied() {
-        if byte < 32 {
-            continue;
-        }
         dictionary[byte as usize] += 1;
         *counter += 1;
     }
