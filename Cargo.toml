@@ -6,8 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bit_buffers = "0.1.2"
-log = "0.4.20"
+trie-rs = "0.1.1"
 termion = "2.0.1"
 strum = "0.25"
 strum_macros = "0.25"

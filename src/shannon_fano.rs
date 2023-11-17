@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 type Probability = (u8, f64);
 
-pub fn encode(alphabet: &[u64; 256], total_count: u64) -> HashMap<u8, String> {
+pub fn encode(alphabet: &[u64; 256], total_count: u64) -> HashMap<u8, Vec<bool>> {
     let probs = create_probability_map(&alphabet, total_count);
     let probs = probs.as_slice();
     let mut codes_map = HashMap::new();
@@ -17,7 +17,7 @@ fn enc(
     alphabet: &[Probability],
     set_start: usize,
     set_end: usize,
-    codes_map: &mut HashMap<u8, String>,
+    codes_map: &mut HashMap<u8, Vec<bool>>,
 ) {
     if set_start.abs_diff(set_end) < 1 {
         return;
@@ -29,13 +29,13 @@ fn enc(
     let lower_set = &alphabet[split_index + 1..=set_end];
 
     for (byte, _) in higher_set {
-        let entry = codes_map.entry(*byte).or_insert(String::new());
-        entry.push('0');
+        let entry = codes_map.entry(*byte).or_insert(Vec::new());
+        entry.push(false);
     }
 
     for (byte, _) in lower_set {
-        let entry = codes_map.entry(*byte).or_insert(String::new());
-        entry.push('1');
+        let entry = codes_map.entry(*byte).or_insert(Vec::new());
+        entry.push(true);
     }
 
     enc(&alphabet, set_start, split_index, codes_map);
@@ -81,7 +81,7 @@ fn partition(alphabet: &[Probability], low: usize, high: usize) -> usize {
     low - 1
 }
 
-#[allow(unused_imports)]
+#[cfg(test)]
 mod tests {
     use super::*;
 
