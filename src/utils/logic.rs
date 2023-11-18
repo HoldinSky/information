@@ -39,6 +39,12 @@ pub fn calculate_file_stats() {
     get_stats_and_print(&dictionary, file_size);
 }
 
+// Structure of encoded file:
+// "Header" -> "Data"
+// "Header": N entries of "Mapping"
+// "Mapping": 1st byte - original symbol, 2nd byte - LENGTH of BIT CODE stored in next 'ceil(LENGTH / 8)' bytes of "Mapping"
+// *Note. Last bits that are not filled in last byte of BIT CODE are set to 0
+
 pub fn encode_file(default: Option<FileInfo>) -> Result<(), Error> {
     let (file, input_path) = match default {
         Some(f) => f,
@@ -206,7 +212,7 @@ fn write_decoded_file(
     let mut reader = FileReader::new();
     let mut bitmap = BitMap::new();
 
-    let chunk_length = 100;
+    let chunk_length = 1000;
     let mut chunk_start = 0;
     let mut decoded_bytes = Vec::new();
 
