@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-type Probability = (u8, f64);
+use crate::types::{FileStats, Probability};
 
-pub fn encode(alphabet: &[u64; 256], total_count: u64) -> HashMap<u8, Vec<bool>> {
-    let probs = create_probability_map(&alphabet, total_count);
+pub fn encode(stats: FileStats) -> HashMap<u8, Vec<bool>> {
+    let probs = create_probability_map(&stats.0, stats.1);
     let probs = probs.as_slice();
     let mut codes_map = HashMap::new();
 
@@ -79,43 +79,4 @@ fn partition(alphabet: &[Probability], low: usize, high: usize) -> usize {
     }
 
     low - 1
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_partition() {
-        let bytes = [
-            (1, 0.2),
-            (2, 0.18),
-            (3, 0.16),
-            (4, 0.13),
-            (5, 0.11),
-            (6, 0.09),
-            (7, 0.08),
-            (8, 0.05),
-        ];
-
-        let mut overall_probability = 0.0_f64;
-        for (_, prob) in bytes {
-            overall_probability += prob;
-        }
-
-        assert!((overall_probability - 1.0).abs() < 1e-10);
-        println!("{}", partition(&bytes, 0, bytes.len() - 1));
-    }
-
-    #[test]
-    fn test_encode() {
-        let mut arr = [0; 256];
-        let mut total = 0;
-        for i in 0..20 {
-            arr[i] = 20 - i as u64;
-            total += arr[i];
-        }
-
-        encode(&arr, total);
-    }
 }

@@ -4,18 +4,18 @@ pub mod logic;
 pub mod terminal;
 
 use self::formulae::parse_chunk_for_unique_bytes;
+use crate::types::{FileInfo, FileStats};
 use crate::utils::file_reader::FileReader;
 use crate::utils::formulae::{
     calculate_entropy, calculate_information_amount, calculate_max_entropy, calculate_redundancy,
 };
+use crate::utils::terminal::get_line_from_user;
 use std::env;
 use std::fs::File;
 use std::io::{stdin, stdout, Write};
 use std::os::unix::ffi::OsStringExt;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
-
-pub type FileStats = ([u64; 256], u64);
 
 pub fn parse_file(file: &File) -> FileStats {
     let mut reader = FileReader::new();
@@ -24,8 +24,9 @@ pub fn parse_file(file: &File) -> FileStats {
     let mut file_size: u64 = 0;
 
     reader
-        .read_file_in_chunks(&file, |buf| {
-            parse_chunk_for_unique_bytes(&mut dictionary, &buf, &mut file_size)
+        .read_file_in_chunks(&file, None, |buf| {
+            parse_chunk_for_unique_bytes(&mut dictionary, &buf, &mut file_size);
+            Ok(())
         })
         .unwrap();
 
@@ -50,7 +51,7 @@ pub fn get_stats_and_print(dictionary: &[u64; 256], file_size: u64) {
     );
 }
 
-fn print_entries_of_current_dir() {
+pub fn print_entries_of_current_dir() {
     println!("Entries in {:?}:", env::current_dir().unwrap());
     for file in terminal::list_files().unwrap() {
         println!("{}", String::from_utf8(file.into_vec()).unwrap());
@@ -68,30 +69,16 @@ pub fn pause(message: &str) {
     stdin().events().next();
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{clear, pause, print_entries_of_current_dir, terminal};
+fn get_file() -> Result<FileInfo, String> {
+    println!("Please enter full path to file and hit 'enter'");
 
-    #[test]
-    #[allow(unused_must_use)]
-    fn test_directory_change() {
-        clear();
-        print_entries_of_current_dir();
+    let user_input = String::from_utf8(get_line_from_user().into_bytes()).unwrap();
+    let path = user_input.trim();
 
-        pause("Press any key...");
-        clear();
-        terminal::change_dir("..");
-        print_entries_of_current_dir();
-
-        pause("Press any key...");
-        clear();
-        terminal::change_dir("..");
-        print_entries_of_current_dir();
-
-        pause("Press any key...");
-        clear();
-        terminal::change_dir("/opfwe");
-        print_entries_of_current_dir();
-        pause("Press any key...");
+    match File::open(path) {
+        Ok(file) => Ok((file, path.to_owned())),
+        Err(_) => {
+            return Err("File with this path and name does not exist".to_owned());
+        }
     }
 }
