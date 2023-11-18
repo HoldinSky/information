@@ -34,16 +34,21 @@ pub fn parse_file(file: &File) -> FileStats {
 }
 
 pub fn get_stats_and_print(dictionary: &[u64; 256], file_size: u64) {
-    let unique_char_count = dictionary.len() as u64;
+    let mut distinct_count = 0;
+    dictionary.map(|b| {
+        if b != 0 {
+            distinct_count += 1
+        }
+    });
 
     let info_amount = calculate_information_amount(dictionary, file_size);
     let entropy = calculate_entropy(info_amount, file_size);
-    let max_entropy = calculate_max_entropy(unique_char_count);
+    let max_entropy = calculate_max_entropy(distinct_count);
     let redundancy = calculate_redundancy(entropy, (entropy as u8) / 8 + 1);
 
     println!("Input is {} bytes long and contain {} unique characters. Information amount={:.2}, Entropy={:.2}, Max.Entropy={:.2}, Redundancy={:.2}",
              file_size,
-             dictionary.len(),
+             distinct_count,
              info_amount,
              entropy,
              max_entropy,

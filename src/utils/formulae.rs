@@ -9,7 +9,9 @@ pub fn calculate_information_amount(dictionary: &[u64; 256], size: u64) -> f64 {
     let mut sum = 0.0;
 
     for i in 0..dictionary.len() {
-        sum += sum_term(dictionary[i], size);
+        if dictionary[i] != 0 {
+            sum += sum_term(dictionary[i], size);
+        }
     }
 
     -(size as f64 * sum)
