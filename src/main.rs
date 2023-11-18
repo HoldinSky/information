@@ -3,8 +3,10 @@ extern crate strum;
 extern crate strum_macros;
 
 mod application;
-mod bit_container;
+mod bit_map;
+mod constants;
 mod shannon_fano;
+mod types;
 mod utils;
 
 fn main() {

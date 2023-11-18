@@ -1,14 +1,13 @@
-use std::collections::HashMap;
-
-use strum_macros::EnumString;
-
 use crate::utils::{clear, logic, pause, terminal::get_line_from_user};
+use std::collections::HashMap;
+use strum_macros::EnumString;
 
 #[derive(Debug, Clone, EnumString)]
 enum MenuOption {
     StatsFile,
     StatsByHand,
     EncodeFile,
+    DecodeFile,
     Exit,
 }
 
@@ -17,7 +16,8 @@ pub fn menu() {
         (1, MenuOption::StatsFile),
         (2, MenuOption::StatsByHand),
         (3, MenuOption::EncodeFile),
-        (4, MenuOption::Exit),
+        (4, MenuOption::DecodeFile),
+        (5, MenuOption::Exit),
     ]);
 
     loop {
@@ -51,7 +51,8 @@ fn print_options() {
     println!("1. Calculate statistics of file");
     println!("2. Calculate statistics of terminal input");
     println!("3. Encode file");
-    println!("4. Exit");
+    println!("4. Decode file");
+    println!("5. Exit");
 }
 
 fn parse_option_from_str(map: &HashMap<u8, MenuOption>, opt: &str) -> Result<MenuOption, String> {
@@ -75,6 +76,7 @@ fn perform_action_by_option(option: MenuOption) {
             Ok(_) => (),
             Err(err) => println!("{}", err),
         },
+        MenuOption::DecodeFile => logic::decode_file(None).unwrap(),
         _ => println!("Cannot process the {:?} option", option),
     };
 }

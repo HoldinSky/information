@@ -1,11 +1,11 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{Error, ErrorKind, Read};
 use std::os::unix::fs::FileExt;
 
-const DEFAULT_BUFFER_SIZE: usize = 2_097_152;
+use crate::constants::DEFAULT_BUFFER_SIZE;
 
 pub struct FileReader {
-    current_position: u64,
+    current_position: usize,
     buffer: [u8; DEFAULT_BUFFER_SIZE],
 }
 
@@ -18,35 +18,39 @@ impl FileReader {
         }
     }
 
-    pub fn read_entire_file(
-        &mut self,
-        file: &mut File,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn read_entire_file(&mut self, file: &mut File) -> Result<String, Error> {
         let mut buf = String::new();
         match file.read_to_string(&mut buf) {
             Ok(_) => Ok(buf),
-            Err(err) => Err(Box::new(err)),
+            Err(err) => Err(Error::new(ErrorKind::Other, err)),
         }
     }
 
-    pub fn read_file_in_chunks<F: FnMut(&[u8]) -> ()>(
+    pub fn read_file_in_chunks<F>(
         &mut self,
         file: &File,
+        start_offset: Option<usize>,
         mut action_on_chunk: F,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        self.current_position = 0;
+    ) -> Result<(), Error>
+    where
+        F: FnMut(&[u8]) -> Result<(), Error>,
+    {
+        self.current_position = match start_offset {
+            Some(off) => off,
+            None => 0,
+        };
 
         loop {
-            let bytes_read = match file.read_at(&mut self.buffer, self.current_position) {
+            let bytes_read = match file.read_at(&mut self.buffer, self.current_position as u64) {
                 Ok(size) => size,
                 Err(err) => {
-                    return Err(Box::new(err));
+                    return Err(Error::new(ErrorKind::Other, err));
                 }
             };
 
-            self.current_position += bytes_read as u64;
+            self.current_position += bytes_read;
 
-            action_on_chunk(&self.buffer[..bytes_read]);
+            action_on_chunk(&self.buffer[..bytes_read])?;
 
             if bytes_read < self.buffer.len() {
                 break Ok(());

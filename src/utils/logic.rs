@@ -1,12 +1,18 @@
+use super::file_reader::FileReader;
+use super::formulae::parse_chunk_for_unique_bytes;
+use super::terminal::get_input_from_user;
+use super::{clear, get_file, get_stats_and_print, parse_file};
+use crate::bit_map::BitMap;
+use crate::constants::DICTIONARY_END;
+use crate::shannon_fano::encode;
+use crate::types::FileInfo;
+use std::cmp::min;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Write};
-
-use super::file_reader::FileReader;
-use super::terminal::{get_input_from_user, get_line_from_user};
-use crate::bit_container::BitContainer;
-use crate::shannon_fano::encode;
-use crate::utils::formulae::parse_chunk_for_unique_bytes;
-use crate::utils::{clear, get_stats_and_print, parse_file};
+use std::ops::Add;
+use std::os::unix::fs::FileExt;
+use trie_rs::Trie;
 
 pub fn calculate_user_input_stats() {
     println!("Please input the message followed by hitting 'ctrl+d'");
@@ -28,13 +34,19 @@ pub fn calculate_file_stats() {
         Err(_) => return,
     };
 
-    let (dictionary, file_size) = parse_file(&file);
+    let (dictionary, file_size) = parse_file(&file.0);
 
     get_stats_and_print(&dictionary, file_size);
 }
 
-pub fn encode_file(default: Option<File>) -> Result<(), Error> {
-    let file = match default {
+// Structure of encoded file:
+// "Header" -> "Data"
+// "Header": N entries of "Mapping"
+// "Mapping": 1st byte - original symbol, 2nd byte - LENGTH of BIT CODE stored in next 'ceil(LENGTH / 8)' bytes of "Mapping"
+// *Note. Last bits that are not filled in last byte of BIT CODE are set to 0
+
+pub fn encode_file(default: Option<FileInfo>) -> Result<(), Error> {
+    let (file, input_path) = match default {
         Some(f) => f,
         None => match get_file() {
             Ok(f) => f,
@@ -42,87 +54,206 @@ pub fn encode_file(default: Option<File>) -> Result<(), Error> {
         },
     };
 
-    let (dictionary, file_size) = parse_file(&file);
-
-    let codes = encode(&dictionary, file_size);
-
-    let mut bitmap = BitContainer::new();
-    let mut reader = FileReader::new();
-    let out_path = "/home/nazar/prg/rust/labs/tik/samples/out/test";
-
-    if let Err(_) = std::fs::remove_file(out_path) {
-        // probably could not delete file as it does not exist
-        ();
+    let out_path = input_path.to_owned().add("-encoded");
+    if let Err(_) = std::fs::remove_file(&out_path) {
+        (); // probably could not delete file as it does not exist
     }
 
-    let mut compressed_file = File::create(out_path).unwrap();
+    let dictionary = encode(parse_file(&file));
+    let mut encoded_file = File::create(&out_path).unwrap();
 
+    if let Err(err) = create_dictionary_header(&dictionary, &mut encoded_file) {
+        return Err(err);
+    }
+    if let Err(err) = write_compressed_file(&file, &mut encoded_file, &dictionary) {
+        return Err(err);
+    }
+
+    println!("Compressing completed succesfully!");
+    Ok(())
+}
+
+fn create_dictionary_header(dict: &HashMap<u8, Vec<bool>>, file: &mut File) -> Result<(), Error> {
     let write_error = "Could not parse directory into file";
-    for key in codes.keys() {
+    let mut bitmap = BitMap::new();
+
+    for key in dict.keys() {
         // write original symbol
-        if let Err(_) = compressed_file.write(&[key.clone()]) {
+        if let Err(_) = file.write(&[key.clone()]) {
+            return Err(Error::new(ErrorKind::Other, write_error));
+        };
+
+        let bit_sequence = dict.get(key).unwrap();
+        // write code length
+        if let Err(_) = file.write(&[bit_sequence.len() as u8]) {
             return Err(Error::new(ErrorKind::Other, write_error));
         };
 
         // get symbol's code and write it to file
-        bitmap.add_code(codes.get(key).unwrap());
-        if let Err(_) = bitmap.flush_to_file(&mut compressed_file) {
+        bitmap.add_sequence(bit_sequence);
+        if let Err(_) = bitmap.flush_to_file(file) {
             return Err(Error::new(ErrorKind::Other, write_error));
         };
-
-        // place delimiter
-        if let Err(_) = compressed_file.write(&[0]) {
-            return Err(Error::new(ErrorKind::Other, write_error));
-        }
     }
 
-    if let Err(_) = compressed_file.write(&[0, 0]) {
-        return Err(Error::new(ErrorKind::Other, write_error));
+    // mark delimiter that corresponds to the end of the file
+    if let Err(_) = file.write(&DICTIONARY_END) {
+        Err(Error::new(ErrorKind::Other, write_error))
+    } else {
+        Ok(())
     }
+}
 
-    reader
-        .read_file_in_chunks(&file, |buf| {
-            for byte in buf {
-                if !codes.contains_key(byte) {
-                    continue;
-                }
-                bitmap.add_code(codes.get(byte).unwrap());
+fn write_compressed_file(
+    original_file: &File,
+    encoded_file: &mut File,
+    dict: &HashMap<u8, Vec<bool>>,
+) -> Result<(), Error> {
+    let mut reader = FileReader::new();
+    let mut bitmap = BitMap::new();
+
+    reader.read_file_in_chunks(&original_file, None, |buf| {
+        for byte in buf {
+            if !dict.contains_key(byte) {
+                continue;
             }
-            match bitmap.flush_to_file(&mut compressed_file) {
-                Ok(_) => (),
-                Err(err) => println!("{}", err),
-            };
-        })
-        .unwrap();
-
-    println!("Compressing completed succesfully!");
-
-    Ok(())
-}
-
-fn get_file() -> Result<File, String> {
-    println!("Please enter full path to file and hit 'enter'");
-
-    let user_input = String::from_utf8(get_line_from_user().into_bytes()).unwrap();
-    let path = user_input.trim();
-
-    match File::open(path) {
-        Ok(file) => Ok(file),
-        Err(_) => {
-            return Err("File with this path and name does not exist".to_owned());
+            bitmap.add_sequence(dict.get(byte).unwrap());
         }
+        match bitmap.flush_to_file(encoded_file) {
+            Ok(_) => (),
+            Err(err) => println!("{}", err),
+        };
+        Ok(())
+    })
+}
+
+pub fn decode_file(default: Option<FileInfo>) -> Result<(), Error> {
+    let (file, input_path) = match default {
+        Some(f) => f,
+        None => match get_file() {
+            Ok(f) => f,
+            Err(err) => return Err(Error::new(ErrorKind::NotFound, err)),
+        },
+    };
+
+    let out_path = &input_path[..input_path.rfind("-encoded").unwrap_or(input_path.len())]
+        .to_owned()
+        .add("-decoded");
+
+    if let Err(_) = std::fs::remove_file(&out_path) {
+        // probably could not delete file as it does not exist
+        ();
+    }
+
+    let mut dictionary: HashMap<Vec<bool>, u8> = HashMap::new();
+    let mut offset: usize = 0;
+
+    read_dictionary_header(&file, &mut dictionary, &mut offset);
+
+    let trie = build_codes_trie(&dictionary);
+    let mut decoded_file = File::create(&out_path).unwrap();
+
+    match write_decoded_file(&file, offset, &mut decoded_file, &trie, &dictionary) {
+        Ok(_) => {
+            println!("Decompressing completed succesfully!");
+            Ok(())
+        }
+        Err(err) => Err(err),
     }
 }
 
-#[cfg(test)]
-#[allow(unused_must_use)]
-mod tests {
-    use std::fs::File;
+fn read_dictionary_header(file: &File, dict: &mut HashMap<Vec<bool>, u8>, offset: &mut usize) {
+    let mut buf = [0_u8; 2048]; // 2Kb buffer
+    file.read_at(&mut buf, 0).unwrap();
 
-    #[test]
-    fn test_encoding() {
-        let file = File::open("/home/nazar/prg/rust/labs/tik/samples/en/test_1.txt").unwrap();
+    let mut bitmap = BitMap::new();
+    // reading dictionary from header of the file
+    while &buf[*offset..=*offset + 1] != DICTIONARY_END {
+        // get original symbol code
+        let symbol = buf[*offset];
+        *offset += 1;
 
-        super::encode_file(Some(file));
+        // get bit sequence length
+        let code_length = buf[*offset];
+        *offset += 1;
+
+        // get bit sequence
+        let bytes_taken_by_code = code_length.div_ceil(8) as usize;
+        for _ in 0..bytes_taken_by_code {
+            bitmap.add_byte(buf[*offset]);
+            *offset += 1;
+        }
+
+        dict.insert(bitmap.get_bits(code_length as usize), symbol);
+        bitmap.clear();
     }
+
+    *offset += 2;
+}
+
+fn build_codes_trie(dict: &HashMap<Vec<bool>, u8>) -> Trie<bool> {
+    let mut builder = trie_rs::TrieBuilder::new();
+    for code in dict.keys() {
+        builder.push(code);
+    }
+
+    builder.build()
+}
+
+fn write_decoded_file(
+    encoded_file: &File,
+    content_offset: usize,
+    decoded_file: &mut File,
+    trie: &Trie<bool>,
+    dictionary: &HashMap<Vec<bool>, u8>,
+) -> Result<(), Error> {
+    let write_error = "Could not parse directory into file";
+
+    let mut reader = FileReader::new();
+    let mut bitmap = BitMap::new();
+
+    let chunk_length = 1000;
+    let mut chunk_start = 0;
+    let mut decoded_bytes = Vec::new();
+
+    let mut bit_sequence = Vec::new();
+
+    reader.read_file_in_chunks(encoded_file, Some(content_offset), |buf| {
+        while chunk_start < buf.len() {
+            let bytes_chunk = &buf[chunk_start..min(chunk_start + chunk_length, buf.len())];
+            bitmap.add_bytes(bytes_chunk);
+
+            bit_sequence.append(&mut bitmap.get_all_bits());
+            let length = bit_sequence.len();
+
+            bitmap.clear();
+
+            let mut ptr_lo = 0;
+            let mut ptr_hi = 1;
+            while ptr_hi < length {
+                while !trie.exact_match(&bit_sequence[ptr_lo..ptr_hi]) && ptr_hi < length {
+                    ptr_hi += 1;
+                }
+                if ptr_hi >= length {
+                    break;
+                }
+
+                decoded_bytes.push(*dictionary.get(&bit_sequence[ptr_lo..ptr_hi]).unwrap());
+
+                ptr_lo = ptr_hi;
+                ptr_hi += 1;
+            }
+
+            if let Err(_) = decoded_file.write(decoded_bytes.as_slice()) {
+                return Err(Error::new(ErrorKind::Other, write_error));
+            };
+
+            decoded_bytes.clear();
+
+            bit_sequence = Vec::from(&bit_sequence[ptr_lo..]);
+            chunk_start += chunk_length;
+        }
+
+        Ok(())
+    })
 }
