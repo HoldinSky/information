@@ -7,7 +7,7 @@ pub fn encode(stats: FileStats) -> HashMap<u8, Vec<bool>> {
     let probs = probs.as_slice();
     let mut codes_map = HashMap::new();
 
-    // actualy encoding
+    // actually encoding
     enc(&probs, 0, probs.len() - 1, &mut codes_map);
 
     codes_map
