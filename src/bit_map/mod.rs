@@ -60,6 +60,15 @@ impl BitMap {
         result
     }
 
+    /// writes all complete bytes in its buffer to file. Last incomplete stays to continue filling
+    pub fn flush_filled_to_file(&mut self, file: &mut File) -> Result<(), Box<dyn Error>> {
+        let result = Ok(file.write_all(self.get_all_bytes())?);
+
+        self.byte_buffer.clear();
+
+        result
+    }
+
     pub fn get_all_bytes(&self) -> &[u8] {
         &self.byte_buffer[..]
     }

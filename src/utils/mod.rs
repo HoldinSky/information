@@ -24,8 +24,8 @@ pub fn parse_file(file: &File) -> FileStats {
     let mut file_size: u64 = 0;
 
     reader
-        .read_file_in_chunks(&file, None, |buf| {
-            parse_chunk_for_unique_bytes(&mut dictionary, &buf, &mut file_size);
+        .read_file_in_chunks(&file, None, |buf, bytes_read| {
+            parse_chunk_for_unique_bytes(&mut dictionary, &buf[..bytes_read], &mut file_size);
             Ok(())
         })
         .unwrap();

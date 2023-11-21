@@ -3,7 +3,7 @@ use super::formulae::parse_chunk_for_unique_bytes;
 use super::terminal::get_input_from_user;
 use super::{clear, get_file, get_stats_and_print, parse_file};
 use crate::bit_map::BitMap;
-use crate::constants::DICTIONARY_END;
+use crate::constants::{ARCHIVE_EXTENSION, DICTIONARY_END};
 use crate::shannon_fano::encode;
 use crate::types::FileInfo;
 use std::cmp::min;
@@ -54,7 +54,7 @@ pub fn encode_file(default: Option<FileInfo>) -> Result<(), Error> {
         },
     };
 
-    let out_path = input_path.to_owned().add("-encoded");
+    let out_path = input_path.to_owned().add(ARCHIVE_EXTENSION);
     if let Err(_) = std::fs::remove_file(&out_path) {
         (); // probably could not delete file as it does not exist
     }
@@ -112,38 +112,57 @@ fn write_compressed_file(
     let mut reader = FileReader::new();
     let mut bitmap = BitMap::new();
 
-    reader.read_file_in_chunks(&original_file, None, |buf| {
-        for byte in buf {
-            if !dict.contains_key(byte) {
-                continue;
+    reader.read_file_in_chunks(&original_file, None, |buf, bytes_read| {
+        for byte in &buf[..bytes_read] {
+            if dict.contains_key(byte) {
+                bitmap.add_sequence(dict.get(byte).unwrap());
             }
-            bitmap.add_sequence(dict.get(byte).unwrap());
         }
-        match bitmap.flush_to_file(encoded_file) {
-            Ok(_) => (),
-            Err(err) => println!("{}", err),
+
+        if let Err(_) = if bytes_read == buf.len() {
+            bitmap.flush_filled_to_file(encoded_file)
+        } else {
+            bitmap.flush_to_file(encoded_file)
+        } {
+            return Err(Error::new(
+                ErrorKind::BrokenPipe,
+                "Error while writing to file",
+            ));
         };
+
         Ok(())
     })
 }
 
 pub fn decode_file(default: Option<FileInfo>) -> Result<(), Error> {
     let (file, input_path) = match default {
-        Some(f) => f,
+        Some(f) => {
+            if !f.1.ends_with(ARCHIVE_EXTENSION) {
+                return Err(Error::new(ErrorKind::InvalidInput, "Unsuported file type."));
+            } else {
+                f
+            }
+        }
         None => match get_file() {
             Ok(f) => f,
             Err(err) => return Err(Error::new(ErrorKind::NotFound, err)),
         },
     };
 
-    let out_path = &input_path[..input_path.rfind("-encoded").unwrap_or(input_path.len())]
-        .to_owned()
-        .add("-decoded");
+    let out_path = &input_path[..input_path
+        .rfind(ARCHIVE_EXTENSION)
+        .unwrap_or(input_path.len())];
+    let out_path = increment_file_index(out_path);
 
     if let Err(_) = std::fs::remove_file(&out_path) {
         // probably could not delete file as it does not exist
         ();
     }
+
+    let mut decoded_file = match File::create(&out_path) {
+        Ok(f) => f,
+        Err(_) => return Err(Error::new(ErrorKind::Other, "Could not create output file")),
+    };
 
     let mut dictionary: HashMap<Vec<bool>, u8> = HashMap::new();
     let mut offset: usize = 0;
@@ -151,11 +170,10 @@ pub fn decode_file(default: Option<FileInfo>) -> Result<(), Error> {
     read_dictionary_header(&file, &mut dictionary, &mut offset);
 
     let trie = build_codes_trie(&dictionary);
-    let mut decoded_file = File::create(&out_path).unwrap();
 
     match write_decoded_file(&file, offset, &mut decoded_file, &trie, &dictionary) {
         Ok(_) => {
-            println!("Decompressing completed succesfully!");
+            println!("Decompressing completed successfully!");
             Ok(())
         }
         Err(err) => Err(err),
@@ -218,9 +236,9 @@ fn write_decoded_file(
 
     let mut bit_sequence = Vec::new();
 
-    reader.read_file_in_chunks(encoded_file, Some(content_offset), |buf| {
-        while chunk_start < buf.len() {
-            let bytes_chunk = &buf[chunk_start..min(chunk_start + chunk_length, buf.len())];
+    reader.read_file_in_chunks(encoded_file, Some(content_offset), |buf, bytes_read| {
+        while chunk_start < bytes_read {
+            let bytes_chunk = &buf[chunk_start..min(chunk_start + chunk_length, bytes_read)];
             bitmap.add_bytes(bytes_chunk);
 
             bit_sequence.append(&mut bitmap.get_all_bits());
@@ -254,6 +272,30 @@ fn write_decoded_file(
             chunk_start += chunk_length;
         }
 
+        chunk_start = 0;
         Ok(())
     })
+}
+
+fn increment_file_index(filepath: &str) -> String {
+    let mut dot_pos = filepath.find(".").unwrap_or(filepath.len());
+    let ext = &filepath[dot_pos..];
+
+    let ind = match filepath.find("_") {
+        Some(underscore_pos) => {
+            let index = filepath[underscore_pos + 1..dot_pos]
+                .parse::<i32>()
+                .unwrap_or(0)
+                + 1;
+            dot_pos = underscore_pos;
+            index
+        }
+        None => 1,
+    };
+
+    filepath[..dot_pos]
+        .to_owned()
+        .add("_")
+        .add(&ind.to_string())
+        .add(ext)
 }
