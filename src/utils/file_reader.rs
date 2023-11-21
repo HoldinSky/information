@@ -33,7 +33,7 @@ impl FileReader {
         mut action_on_chunk: F,
     ) -> Result<(), Error>
     where
-        F: FnMut(&[u8]) -> Result<(), Error>,
+        F: FnMut(&[u8], usize) -> Result<(), Error>,
     {
         self.current_position = match start_offset {
             Some(off) => off,
@@ -50,7 +50,7 @@ impl FileReader {
 
             self.current_position += bytes_read;
 
-            action_on_chunk(&self.buffer[..bytes_read])?;
+            action_on_chunk(&self.buffer, bytes_read)?;
 
             if bytes_read < self.buffer.len() {
                 break Ok(());
