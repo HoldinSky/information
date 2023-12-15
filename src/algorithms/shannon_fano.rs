@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use crate::types::{FileStats, Probability};
 
+use super::create_probability_map;
+
 pub fn encode(stats: FileStats) -> HashMap<u8, Vec<bool>> {
     let probs = create_probability_map(&stats.0, stats.1);
     let probs = probs.as_slice();
@@ -40,20 +42,6 @@ fn enc(
 
     enc(&alphabet, set_start, split_index, codes_map);
     enc(&alphabet, split_index + 1, set_end, codes_map);
-}
-
-fn create_probability_map(&alphabet: &[u64; 256], total_count: u64) -> Vec<Probability> {
-    let mut probabilities = vec![];
-    for byte in 0..alphabet.len() {
-        if alphabet[byte] == 0 {
-            continue;
-        }
-        probabilities.push((byte as u8, alphabet[byte] as f64 / total_count as f64));
-    }
-
-    probabilities.sort_by(|a, b| b.1.total_cmp(&a.1));
-
-    probabilities
 }
 
 /// returns index of last element in higher set (marked as 0 in next stage) inclusively

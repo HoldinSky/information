@@ -2,10 +2,10 @@ use super::file_reader::FileReader;
 use super::formulae::parse_chunk_for_unique_bytes;
 use super::terminal::get_input_from_user;
 use super::{clear, get_file, get_stats_and_print, parse_file};
+use crate::algorithms::{huffman, shannon_fano};
 use crate::bit_map::BitMap;
-use crate::constants::{ARCHIVE_EXTENSION, DICTIONARY_END};
-use crate::shannon_fano::encode;
-use crate::types::FileInfo;
+use crate::types::{CodeType, FileInfo};
+use crate::utils::constants::{ARCHIVE_EXTENSION, DICTIONARY_END};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::fs::File;
@@ -45,7 +45,7 @@ pub fn calculate_file_stats() {
 // "Mapping": 1st byte - original symbol, 2nd byte - LENGTH of BIT CODE stored in next 'ceil(LENGTH / 8)' bytes of "Mapping"
 // *Note. Last bits that are not filled in last byte of BIT CODE are set to 0
 
-pub fn encode_file(default: Option<FileInfo>) -> Result<(), Error> {
+pub fn encode_file(default: Option<FileInfo>, code_type: CodeType) -> Result<(), Error> {
     let (file, input_path) = match default {
         Some(f) => f,
         None => match get_file() {
@@ -59,7 +59,11 @@ pub fn encode_file(default: Option<FileInfo>) -> Result<(), Error> {
         (); // probably could not delete file as it does not exist
     }
 
-    let dictionary = encode(parse_file(&file));
+    let dictionary = match code_type {
+        CodeType::ShannonFano => shannon_fano::encode(parse_file(&file)),
+        CodeType::Huffman => huffman::encode(parse_file(&file)),
+    };
+
     let mut encoded_file = File::create(&out_path).unwrap();
 
     if let Err(err) = create_dictionary_header(&dictionary, &mut encoded_file) {
@@ -134,7 +138,7 @@ fn write_compressed_file(
     })
 }
 
-pub fn decode_file(default: Option<FileInfo>) -> Result<(), Error> {
+pub fn shannon_fano_decode_file(default: Option<FileInfo>) -> Result<(), Error> {
     let (file, input_path) = match default {
         Some(f) => {
             if !f.1.ends_with(ARCHIVE_EXTENSION) {
@@ -230,33 +234,33 @@ fn write_decoded_file(
     let mut reader = FileReader::new();
     let mut bitmap = BitMap::new();
 
-    let chunk_length = 1000;
+    let chunk_length = 102_400;
     let mut chunk_start = 0;
     let mut decoded_bytes = Vec::new();
 
-    let mut bit_sequence = Vec::new();
+    let mut bit_stream = Vec::new();
 
     reader.read_file_in_chunks(encoded_file, Some(content_offset), |buf, bytes_read| {
         while chunk_start < bytes_read {
             let bytes_chunk = &buf[chunk_start..min(chunk_start + chunk_length, bytes_read)];
             bitmap.add_bytes(bytes_chunk);
 
-            bit_sequence.append(&mut bitmap.get_all_bits());
-            let length = bit_sequence.len();
-
+            bit_stream.append(&mut bitmap.get_all_bits());
             bitmap.clear();
+
+            let length = bit_stream.len();
 
             let mut ptr_lo = 0;
             let mut ptr_hi = 1;
             while ptr_hi < length {
-                while !trie.exact_match(&bit_sequence[ptr_lo..ptr_hi]) && ptr_hi < length {
+                while !trie.exact_match(&bit_stream[ptr_lo..ptr_hi]) && ptr_hi < length {
                     ptr_hi += 1;
                 }
                 if ptr_hi >= length {
                     break;
                 }
 
-                decoded_bytes.push(*dictionary.get(&bit_sequence[ptr_lo..ptr_hi]).unwrap());
+                decoded_bytes.push(*dictionary.get(&bit_stream[ptr_lo..ptr_hi]).unwrap());
 
                 ptr_lo = ptr_hi;
                 ptr_hi += 1;
@@ -268,7 +272,7 @@ fn write_decoded_file(
 
             decoded_bytes.clear();
 
-            bit_sequence = Vec::from(&bit_sequence[ptr_lo..]);
+            bit_stream = Vec::from(&bit_stream[ptr_lo..]);
             chunk_start += chunk_length;
         }
 

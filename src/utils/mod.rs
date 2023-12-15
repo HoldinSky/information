@@ -1,3 +1,4 @@
+pub mod constants;
 pub mod file_reader;
 pub mod formulae;
 pub mod logic;
@@ -83,7 +84,7 @@ fn get_file() -> Result<FileInfo, String> {
     match File::open(path) {
         Ok(file) => Ok((file, path.to_owned())),
         Err(_) => {
-            return Err("File with this path and name does not exist".to_owned());
+            return Err("File by specified full path does not exist".to_owned());
         }
     }
 }

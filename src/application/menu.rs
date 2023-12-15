@@ -1,8 +1,11 @@
-use crate::utils::{clear, logic, pause, terminal::get_line_from_user};
+use crate::{
+    types::CodeType,
+    utils::{clear, logic, pause, terminal::get_line_from_user},
+};
 use std::collections::HashMap;
 use strum_macros::EnumString;
 
-#[derive(Debug, Clone, EnumString)]
+#[derive(Debug, Copy, Clone, EnumString)]
 enum MenuOption {
     StatsFile,
     StatsByHand,
@@ -55,7 +58,12 @@ fn print_options() {
     println!("5. Exit");
 }
 
-fn parse_option_from_str(map: &HashMap<u8, MenuOption>, opt: &str) -> Result<MenuOption, String> {
+fn print_code_types() {
+    println!("1. Shannon Fano");
+    println!("2. Huffman");
+}
+
+fn parse_option_from_str<T: Copy>(map: &HashMap<u8, T>, opt: &str) -> Result<T, String> {
     let option = match opt.parse::<u8>() {
         Ok(val) => val,
         Err(_) => return Err(String::from("Option must be a digit")),
@@ -72,11 +80,40 @@ fn perform_action_by_option(option: MenuOption) {
     match option {
         MenuOption::StatsByHand => logic::calculate_user_input_stats(),
         MenuOption::StatsFile => logic::calculate_file_stats(),
-        MenuOption::EncodeFile => match logic::encode_file(None) {
+        MenuOption::EncodeFile => {
+            if let Some(ct) = choose_encoding_type() {
+                clear();
+                match logic::encode_file(None, ct) {
+                    Ok(_) => (),
+                    Err(err) => println!("{}", err),
+                }
+            }
+        }
+        MenuOption::DecodeFile => match logic::shannon_fano_decode_file(None) {
             Ok(_) => (),
             Err(err) => println!("{}", err),
         },
-        MenuOption::DecodeFile => logic::decode_file(None).unwrap(),
         _ => println!("Cannot process the {:?} option", option),
     };
+}
+
+fn choose_encoding_type() -> Option<CodeType> {
+    println!("Choose encoding type");
+
+    clear();
+    print_code_types();
+
+    let option =
+        String::from_utf8(get_line_from_user().into_bytes()).unwrap_or("error".to_string());
+
+    match parse_option_from_str(
+        &HashMap::from([(1_u8, CodeType::Huffman), (2_u8, CodeType::ShannonFano)]),
+        option.trim(),
+    ) {
+        Ok(code_type) => Some(code_type),
+        Err(message) => {
+            println!("{}. Press any key...", message);
+            None
+        }
+    }
 }

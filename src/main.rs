@@ -1,11 +1,12 @@
 #![allow(dead_code)]
+
 extern crate strum;
 extern crate strum_macros;
 
+mod algorithms;
 mod application;
 mod bit_map;
-mod constants;
-mod shannon_fano;
+mod tests;
 mod types;
 mod utils;
 

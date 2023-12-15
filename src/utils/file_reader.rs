@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
 use std::os::unix::fs::FileExt;
 
-use crate::constants::DEFAULT_BUFFER_SIZE;
+use super::constants::DEFAULT_BUFFER_SIZE;
 
 pub struct FileReader {
     current_position: usize,
