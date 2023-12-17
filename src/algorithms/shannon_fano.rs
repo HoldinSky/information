@@ -4,7 +4,7 @@ use crate::types::{FileStats, Probability};
 
 use super::create_probability_map;
 
-pub fn encode(stats: FileStats) -> HashMap<u8, Vec<bool>> {
+pub fn encode(stats: FileStats) -> HashMap<u8, Vec<u8>> {
     let probs = create_probability_map(&stats.0, stats.1);
     let probs = probs.as_slice();
     let mut codes_map = HashMap::new();
@@ -19,7 +19,7 @@ fn enc(
     alphabet: &[Probability],
     set_start: usize,
     set_end: usize,
-    codes_map: &mut HashMap<u8, Vec<bool>>,
+    codes_map: &mut HashMap<u8, Vec<u8>>,
 ) {
     if set_start.abs_diff(set_end) < 1 {
         return;
@@ -32,12 +32,12 @@ fn enc(
 
     for (byte, _) in higher_set {
         let entry = codes_map.entry(*byte).or_insert(Vec::new());
-        entry.push(false);
+        entry.push(0);
     }
 
     for (byte, _) in lower_set {
         let entry = codes_map.entry(*byte).or_insert(Vec::new());
-        entry.push(true);
+        entry.push(1);
     }
 
     enc(&alphabet, set_start, split_index, codes_map);

@@ -25,7 +25,7 @@ impl BitMap {
         }
     }
 
-    pub fn add_sequence(&mut self, code: &Vec<bool>) {
+    pub fn add_sequence(&mut self, code: &Vec<u8>) {
         for bit in code {
             self.add_bit(*bit);
         }
@@ -33,12 +33,12 @@ impl BitMap {
 
     pub fn add_code(&mut self, code: &str) {
         for ch in code.chars() {
-            self.add_bit(ch == '1');
+            self.add_bit(if ch == '1' { 1 } else { 0 });
         }
     }
 
-    pub fn add_bit(&mut self, bit: bool) {
-        if bit {
+    pub fn add_bit(&mut self, bit: u8) {
+        if bit == 1 {
             self.current_byte |= 1 << self.current_bit;
         }
         self.current_bit += 1;
@@ -133,7 +133,7 @@ impl From<Vec<u8>> for BitMap {
         let mut container = Self::new();
 
         for bit in value {
-            container.add_bit(bit != 0);
+            container.add_bit(bit);
         }
 
         container
@@ -145,7 +145,7 @@ impl From<Vec<bool>> for BitMap {
         let mut container = Self::new();
 
         for bit in value {
-            container.add_bit(bit);
+            container.add_bit(if bit { 1 } else { 0 });
         }
 
         container

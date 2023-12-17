@@ -23,6 +23,12 @@ pub struct Quantity {
     pub quantity: u128,
 }
 
+pub struct EncodingSettings {
+    pub file_info: FileInfo,
+    pub code_type: CodeType,
+    pub hamming_code_length: Option<u8>,
+}
+
 type NodePtr<T> = Option<Box<Node<T>>>;
 
 #[derive(Debug)]

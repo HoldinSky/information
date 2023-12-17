@@ -1,8 +1,11 @@
 use crate::{
-    types::CodeType,
-    utils::{clear, logic, pause, terminal::get_line_from_user},
+    types::{CodeType, EncodingSettings},
+    utils::{clear, get_file, logic, pause, terminal::get_line_from_user},
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{Error, ErrorKind},
+};
 use strum_macros::EnumString;
 
 #[derive(Debug, Copy, Clone, EnumString)]
@@ -38,7 +41,9 @@ pub fn menu() {
                     _ => (),
                 };
 
-                perform_action_by_option(res)
+                if let Err(err) = perform_action_by_option(res) {
+                    println!("{}", err);
+                }
             }
             Err(message) => {
                 pause(format!("{}. Press any key...", message).as_str());
@@ -75,32 +80,47 @@ fn parse_option_from_str<T: Copy>(map: &HashMap<u8, T>, opt: &str) -> Result<T, 
     }
 }
 
-fn perform_action_by_option(option: MenuOption) {
+fn perform_action_by_option(option: MenuOption) -> Result<(), Error> {
     clear();
     match option {
-        MenuOption::StatsByHand => logic::calculate_user_input_stats(),
-        MenuOption::StatsFile => logic::calculate_file_stats(),
+        MenuOption::StatsByHand => Ok(logic::calculate_user_input_stats()),
+        MenuOption::StatsFile => Ok(logic::calculate_file_stats()),
         MenuOption::EncodeFile => {
-            if let Some(ct) = choose_encoding_type() {
-                clear();
-                match logic::encode_file(None, ct) {
-                    Ok(_) => (),
-                    Err(err) => println!("{}", err),
-                }
-            }
+            let settings = encoding_prerequisites()?;
+            Ok(logic::encode_file(settings)?)
         }
-        MenuOption::DecodeFile => match logic::shannon_fano_decode_file(None) {
-            Ok(_) => (),
-            Err(err) => println!("{}", err),
-        },
-        _ => println!("Cannot process the {:?} option", option),
+        MenuOption::DecodeFile => Ok(logic::decode_file(None)?),
+        _ => Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("Cannot process the {:?} option", option),
+        )),
+    }
+}
+
+fn encoding_prerequisites() -> Result<EncodingSettings, Error> {
+    let file_info = match get_file() {
+        Ok(f) => f,
+        Err(err) => return Err(Error::new(ErrorKind::NotFound, err)),
     };
+
+    let code_type = loop {
+        clear();
+        println!("Choose encoding type");
+        if let Some(ct) = choose_encoding_type() {
+            break ct;
+        }
+    };
+
+    let hamming_code_length = choose_hamming_code_length()?;
+
+    Ok(EncodingSettings {
+        code_type,
+        file_info,
+        hamming_code_length,
+    })
 }
 
 fn choose_encoding_type() -> Option<CodeType> {
-    println!("Choose encoding type");
-
-    clear();
     print_code_types();
 
     let option =
@@ -115,5 +135,37 @@ fn choose_encoding_type() -> Option<CodeType> {
             println!("{}. Press any key...", message);
             None
         }
+    }
+}
+
+fn choose_hamming_code_length() -> Result<Option<u8>, Error> {
+    if !ask_use_hamming_code()? {
+        return Ok(None);
+    };
+
+    loop {
+        clear();
+        println!("Input size of whole hamming code (7 - 255");
+        let input = get_line_from_user();
+
+        match input.parse::<u8>() {
+            Ok(ham_code_lenght) => return Ok(Some(ham_code_lenght)),
+            Err(err) => pause(format!("{}", err).as_str()),
+        }
+    }
+}
+
+fn ask_use_hamming_code() -> Result<bool, Error> {
+    println!("Use hamming codes to compress data? (y/n)");
+
+    let ans = get_line_from_user().to_lowercase();
+
+    if ans != "y" && ans != "n" {
+        Err(Error::new(
+            ErrorKind::InvalidInput,
+            "Failed to parse the input.",
+        ))
+    } else {
+        Ok(ans == "y")
     }
 }

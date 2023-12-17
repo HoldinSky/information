@@ -3,7 +3,7 @@ use crate::types::{FileStats, Node, Quantity};
 use min_max_heap::MinMaxHeap;
 use std::collections::HashMap;
 
-pub fn encode(stats: FileStats) -> HashMap<u8, Vec<bool>> {
+pub fn encode(stats: FileStats) -> HashMap<u8, Vec<u8>> {
     let probs = create_quantity_map(&stats.0);
     let mut min_max_heap: MinMaxHeap<Node<Quantity>> = MinMaxHeap::new();
 
@@ -17,7 +17,7 @@ pub fn encode(stats: FileStats) -> HashMap<u8, Vec<bool>> {
     enc(min_max_heap)
 }
 
-fn enc(mut min_heap: MinMaxHeap<Node<Quantity>>) -> HashMap<u8, Vec<bool>> {
+fn enc(mut min_heap: MinMaxHeap<Node<Quantity>>) -> HashMap<u8, Vec<u8>> {
     let mut codes = HashMap::new();
 
     while min_heap.len() > 1 {
@@ -38,11 +38,11 @@ fn enc(mut min_heap: MinMaxHeap<Node<Quantity>>) -> HashMap<u8, Vec<bool>> {
     let mut root = min_heap.pop_min().unwrap();
 
     if let Some(mut left_subtree) = root.left.take() {
-        let mut vec = vec![false];
+        let mut vec = vec![0];
         walk_tree_with_action(&mut *left_subtree, &mut vec, &mut codes);
     };
     if let Some(mut right_subtree) = root.right.take() {
-        let mut vec = vec![true];
+        let mut vec = vec![1];
         walk_tree_with_action(&mut *right_subtree, &mut vec, &mut codes);
     };
 
@@ -51,8 +51,8 @@ fn enc(mut min_heap: MinMaxHeap<Node<Quantity>>) -> HashMap<u8, Vec<bool>> {
 
 fn walk_tree_with_action(
     root: &mut Node<Quantity>,
-    codes_array: &mut Vec<bool>,
-    codes_map: &mut HashMap<u8, Vec<bool>>,
+    codes_array: &mut Vec<u8>,
+    codes_map: &mut HashMap<u8, Vec<u8>>,
 ) {
     if root.left.is_none() && root.right.is_none() {
         codes_map.insert(root.val.byte, codes_array.clone());
@@ -62,11 +62,11 @@ fn walk_tree_with_action(
     }
 
     if let Some(mut left_subtree) = root.left.take() {
-        codes_array.push(false);
+        codes_array.push(0);
         walk_tree_with_action(&mut *left_subtree, codes_array, codes_map);
     };
     if let Some(mut right_subtree) = root.right.take() {
-        codes_array.push(true);
+        codes_array.push(1);
         walk_tree_with_action(&mut *right_subtree, codes_array, codes_map);
     };
 

@@ -1,5 +1,6 @@
 use crate::types::{Probability, Quantity};
 
+pub mod hamming;
 pub mod huffman;
 pub mod shannon_fano;
 

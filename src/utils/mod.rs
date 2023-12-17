@@ -18,15 +18,14 @@ use std::os::unix::ffi::OsStringExt;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 
-pub fn parse_file(file: &File) -> FileStats {
-    let mut reader = FileReader::new();
-
+pub fn parse_file(file_reader: &mut FileReader) -> FileStats {
     let mut dictionary: [u64; 256] = [0; 256];
     let mut file_size: u64 = 0;
 
-    reader
-        .read_file_in_chunks(&file, None, |buf, bytes_read| {
-            parse_chunk_for_unique_bytes(&mut dictionary, &buf[..bytes_read], &mut file_size);
+    file_reader.rewind();
+    file_reader
+        .read_file_in_chunks(|buf, _| {
+            parse_chunk_for_unique_bytes(&mut dictionary, &buf, &mut file_size);
             Ok(())
         })
         .unwrap();
@@ -75,7 +74,7 @@ pub fn pause(message: &str) {
     stdin().events().next();
 }
 
-fn get_file() -> Result<FileInfo, String> {
+pub fn get_file() -> Result<FileInfo, String> {
     println!("Please enter full path to file and hit 'enter'");
 
     let user_input = String::from_utf8(get_line_from_user().into_bytes()).unwrap();

@@ -1,10 +1,11 @@
+use super::constants::HAMMING_CODE_LENGTH_KEY;
 use super::file_reader::FileReader;
 use super::formulae::parse_chunk_for_unique_bytes;
 use super::terminal::get_input_from_user;
 use super::{clear, get_file, get_stats_and_print, parse_file};
-use crate::algorithms::{huffman, shannon_fano};
+use crate::algorithms::{hamming, huffman, shannon_fano};
 use crate::bit_map::BitMap;
-use crate::types::{CodeType, FileInfo};
+use crate::types::{CodeType, EncodingSettings, FileInfo};
 use crate::utils::constants::{ARCHIVE_EXTENSION, DICTIONARY_END};
 use std::cmp::min;
 use std::collections::HashMap;
@@ -34,7 +35,8 @@ pub fn calculate_file_stats() {
         Err(_) => return,
     };
 
-    let (dictionary, file_size) = parse_file(&file.0);
+    let mut file_reader = FileReader::new(file.0);
+    let (dictionary, file_size) = parse_file(&mut file_reader);
 
     get_stats_and_print(&dictionary, file_size);
 }
@@ -45,31 +47,35 @@ pub fn calculate_file_stats() {
 // "Mapping": 1st byte - original symbol, 2nd byte - LENGTH of BIT CODE stored in next 'ceil(LENGTH / 8)' bytes of "Mapping"
 // *Note. Last bits that are not filled in last byte of BIT CODE are set to 0
 
-pub fn encode_file(default: Option<FileInfo>, code_type: CodeType) -> Result<(), Error> {
-    let (file, input_path) = match default {
-        Some(f) => f,
-        None => match get_file() {
-            Ok(f) => f,
-            Err(err) => return Err(Error::new(ErrorKind::NotFound, err)),
-        },
-    };
+pub fn encode_file(settings: EncodingSettings) -> Result<(), Error> {
+    let (original_file, input_path) = settings.file_info;
 
     let out_path = input_path.to_owned().add(ARCHIVE_EXTENSION);
     if let Err(_) = std::fs::remove_file(&out_path) {
         (); // probably could not delete file as it does not exist
     }
+    let mut file_reader = FileReader::new(original_file);
 
-    let dictionary = match code_type {
-        CodeType::ShannonFano => shannon_fano::encode(parse_file(&file)),
-        CodeType::Huffman => huffman::encode(parse_file(&file)),
+    let dictionary = match settings.code_type {
+        CodeType::ShannonFano => shannon_fano::encode(parse_file(&mut file_reader)),
+        CodeType::Huffman => huffman::encode(parse_file(&mut file_reader)),
     };
 
-    let mut encoded_file = File::create(&out_path).unwrap();
+    let mut output_file = File::create(&out_path).unwrap();
 
-    if let Err(err) = create_dictionary_header(&dictionary, &mut encoded_file) {
+    if let Err(err) =
+        create_dictionary_header(&mut output_file, &dictionary, settings.hamming_code_length)
+    {
         return Err(err);
     }
-    if let Err(err) = write_compressed_file(&file, &mut encoded_file, &dictionary) {
+
+    file_reader.rewind();
+    if let Err(err) = write_compressed_file(
+        &mut file_reader,
+        &mut output_file,
+        &dictionary,
+        settings.hamming_code_length,
+    ) {
         return Err(err);
     }
 
@@ -77,69 +83,136 @@ pub fn encode_file(default: Option<FileInfo>, code_type: CodeType) -> Result<(),
     Ok(())
 }
 
-fn create_dictionary_header(dict: &HashMap<u8, Vec<bool>>, file: &mut File) -> Result<(), Error> {
+fn create_dictionary_header(
+    file: &mut File,
+    dict: &HashMap<u8, Vec<u8>>,
+    hamming_code_length: Option<u8>,
+) -> Result<(), Error> {
     let write_error = "Could not parse directory into file";
     let mut bitmap = BitMap::new();
 
+    if let Some(code_length) = hamming_code_length {
+        file.write_all(&HAMMING_CODE_LENGTH_KEY)?;
+        file.write_all(&[code_length])?;
+    }
+
     for key in dict.keys() {
         // write original symbol
-        if let Err(_) = file.write(&[key.clone()]) {
-            return Err(Error::new(ErrorKind::Other, write_error));
-        };
+        file.write(&[key.clone()])?;
 
         let bit_sequence = dict.get(key).unwrap();
+
         // write code length
-        if let Err(_) = file.write(&[bit_sequence.len() as u8]) {
-            return Err(Error::new(ErrorKind::Other, write_error));
-        };
+        file.write(&[bit_sequence.len() as u8])?;
 
         // get symbol's code and write it to file
         bitmap.add_sequence(bit_sequence);
+
         if let Err(_) = bitmap.flush_to_file(file) {
             return Err(Error::new(ErrorKind::Other, write_error));
         };
     }
 
     // mark delimiter that corresponds to the end of the file
-    if let Err(_) = file.write(&DICTIONARY_END) {
-        Err(Error::new(ErrorKind::Other, write_error))
-    } else {
-        Ok(())
-    }
+    file.write(&DICTIONARY_END)?;
+
+    Ok(())
 }
 
 fn write_compressed_file(
-    original_file: &File,
-    encoded_file: &mut File,
-    dict: &HashMap<u8, Vec<bool>>,
+    file_reader: &mut FileReader,
+    output_file: &mut File,
+    dictionary: &HashMap<u8, Vec<u8>>,
+    hamming_code_length: Option<u8>,
 ) -> Result<(), Error> {
-    let mut reader = FileReader::new();
     let mut bitmap = BitMap::new();
 
-    reader.read_file_in_chunks(&original_file, None, |buf, bytes_read| {
-        for byte in &buf[..bytes_read] {
-            if dict.contains_key(byte) {
-                bitmap.add_sequence(dict.get(byte).unwrap());
-            }
-        }
+    if let Some(hmcl) = hamming_code_length {
+        let data_len = hamming::parity_bits_in_message(hmcl as usize);
+        file_reader.read_file_in_chunks(|buf, end_of_file| {
+            transform_data_with_hamming_codes(
+                output_file,
+                dictionary,
+                &mut bitmap,
+                buf,
+                end_of_file,
+                data_len,
+            )
+        })?;
+    } else {
+        file_reader.read_file_in_chunks(|buf, end_of_file| {
+            transofrm_data_to_raw(output_file, dictionary, &mut bitmap, buf, end_of_file)
+        })?;
+    };
 
-        if let Err(_) = if bytes_read == buf.len() {
-            bitmap.flush_filled_to_file(encoded_file)
-        } else {
-            bitmap.flush_to_file(encoded_file)
-        } {
-            return Err(Error::new(
-                ErrorKind::BrokenPipe,
-                "Error while writing to file",
-            ));
-        };
-
-        Ok(())
-    })
+    Ok(())
 }
 
-pub fn shannon_fano_decode_file(default: Option<FileInfo>) -> Result<(), Error> {
-    let (file, input_path) = match default {
+fn transform_data_with_hamming_codes(
+    output_file: &mut File,
+    dictionary: &HashMap<u8, Vec<u8>>,
+    bitmap: &mut BitMap,
+    buf: &[u8],
+    end_of_file: bool,
+    data_len: usize,
+) -> Result<(), Error> {
+    let chunk_size = 1024;
+    let buf_len = buf.len();
+
+    for i in (0..buf_len).step_by(chunk_size) {
+        let valid_bytes_chunk = &buf[i..min(i + chunk_size, buf_len)];
+
+        for byte in valid_bytes_chunk {
+            if dictionary.contains_key(byte) {
+                bitmap.add_sequence(dictionary.get(byte).unwrap());
+            }
+        }
+    }
+
+    // if bytes_read is same
+    if let Err(_) = if end_of_file {
+        bitmap.flush_to_file(output_file)
+    } else {
+        bitmap.flush_filled_to_file(output_file)
+    } {
+        return Err(Error::new(
+            ErrorKind::BrokenPipe,
+            "Error while writing to file",
+        ));
+    };
+
+    Ok(())
+}
+
+fn transofrm_data_to_raw(
+    output_file: &mut File,
+    dictionary: &HashMap<u8, Vec<u8>>,
+    bitmap: &mut BitMap,
+    buf: &[u8],
+    end_of_file: bool,
+) -> Result<(), Error> {
+    for byte in buf {
+        if dictionary.contains_key(byte) {
+            bitmap.add_sequence(dictionary.get(byte).unwrap());
+        }
+    }
+
+    if let Err(_) = if end_of_file {
+        bitmap.flush_to_file(output_file)
+    } else {
+        bitmap.flush_filled_to_file(output_file)
+    } {
+        return Err(Error::new(
+            ErrorKind::BrokenPipe,
+            "Error while writing to file",
+        ));
+    };
+
+    Ok(())
+}
+
+pub fn decode_file(file_info: Option<FileInfo>) -> Result<(), Error> {
+    let (encoded_file, input_path) = match file_info {
         Some(f) => {
             if !f.1.ends_with(ARCHIVE_EXTENSION) {
                 return Err(Error::new(ErrorKind::InvalidInput, "Unsuported file type."));
@@ -169,13 +242,16 @@ pub fn shannon_fano_decode_file(default: Option<FileInfo>) -> Result<(), Error> 
     };
 
     let mut dictionary: HashMap<Vec<bool>, u8> = HashMap::new();
-    let mut offset: usize = 0;
 
-    read_dictionary_header(&file, &mut dictionary, &mut offset);
+    // actual algorithm of decoding starts here
+    let (header_offset, hamming_code_len) = read_dictionary_header(&encoded_file, &mut dictionary);
+
+    let mut file_reader = FileReader::new(encoded_file);
+    file_reader.set_offset(header_offset);
 
     let trie = build_codes_trie(&dictionary);
 
-    match write_decoded_file(&file, offset, &mut decoded_file, &trie, &dictionary) {
+    match write_decoded_file(&mut file_reader, &mut decoded_file, &trie, &dictionary) {
         Ok(_) => {
             println!("Decompressing completed successfully!");
             Ok(())
@@ -184,33 +260,44 @@ pub fn shannon_fano_decode_file(default: Option<FileInfo>) -> Result<(), Error> 
     }
 }
 
-fn read_dictionary_header(file: &File, dict: &mut HashMap<Vec<bool>, u8>, offset: &mut usize) {
+fn read_dictionary_header(
+    file: &File,
+    dict: &mut HashMap<Vec<bool>, u8>,
+) -> (usize, Option<usize>) {
     let mut buf = [0_u8; 2048]; // 2Kb buffer
+    let mut offset = 0;
     file.read_at(&mut buf, 0).unwrap();
 
     let mut bitmap = BitMap::new();
+
+    let hamming_code_len = if &buf[..HAMMING_CODE_LENGTH_KEY.len()] == HAMMING_CODE_LENGTH_KEY {
+        Some(buf[HAMMING_CODE_LENGTH_KEY.len()] as usize)
+    } else {
+        None
+    };
     // reading dictionary from header of the file
-    while &buf[*offset..=*offset + 1] != DICTIONARY_END {
+    while &buf[offset..=offset + 1] != DICTIONARY_END {
         // get original symbol code
-        let symbol = buf[*offset];
-        *offset += 1;
+        let symbol = buf[offset];
+        offset += 1;
 
         // get bit sequence length
-        let code_length = buf[*offset];
-        *offset += 1;
+        let code_length = buf[offset];
+        offset += 1;
 
         // get bit sequence
         let bytes_taken_by_code = code_length.div_ceil(8) as usize;
         for _ in 0..bytes_taken_by_code {
-            bitmap.add_byte(buf[*offset]);
-            *offset += 1;
+            bitmap.add_byte(buf[offset]);
+            offset += 1;
         }
 
         dict.insert(bitmap.get_bits(code_length as usize), symbol);
         bitmap.clear();
     }
 
-    *offset += 2;
+    offset += 2;
+    (offset, hamming_code_len)
 }
 
 fn build_codes_trie(dict: &HashMap<Vec<bool>, u8>) -> Trie<bool> {
@@ -223,15 +310,13 @@ fn build_codes_trie(dict: &HashMap<Vec<bool>, u8>) -> Trie<bool> {
 }
 
 fn write_decoded_file(
-    encoded_file: &File,
-    content_offset: usize,
+    file_reader: &mut FileReader,
     decoded_file: &mut File,
     trie: &Trie<bool>,
     dictionary: &HashMap<Vec<bool>, u8>,
 ) -> Result<(), Error> {
     let write_error = "Could not parse directory into file";
 
-    let mut reader = FileReader::new();
     let mut bitmap = BitMap::new();
 
     let chunk_length = 102_400;
@@ -240,9 +325,10 @@ fn write_decoded_file(
 
     let mut bit_stream = Vec::new();
 
-    reader.read_file_in_chunks(encoded_file, Some(content_offset), |buf, bytes_read| {
-        while chunk_start < bytes_read {
-            let bytes_chunk = &buf[chunk_start..min(chunk_start + chunk_length, bytes_read)];
+    file_reader.read_file_in_chunks(|buf, _| {
+        let buf_len = buf.len();
+        while chunk_start < buf_len {
+            let bytes_chunk = &buf[chunk_start..min(chunk_start + chunk_length, buf_len)];
             bitmap.add_bytes(bytes_chunk);
 
             bit_stream.append(&mut bitmap.get_all_bits());
