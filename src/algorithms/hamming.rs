@@ -1,5 +1,7 @@
-pub fn add_parity(data: &Vec<u8>) -> Vec<u8> {
-    let mut message = data_to_message(&data);
+use std::{cmp::min, io::Write};
+
+pub fn add_parity(data: &[u8]) -> Vec<u8> {
+    let mut message = data_to_message(data);
     let msg_len = message.len();
 
     // assigning parity bits
@@ -25,20 +27,56 @@ pub fn add_parity(data: &Vec<u8>) -> Vec<u8> {
     message
 }
 
-pub fn remove_parity(message: &mut Vec<u8>) -> Vec<u8> {
+pub fn remove_parity(message: &mut [u8]) -> Vec<u8> {
     let syndrom = check_for_erros(message);
 
     correct_error(message, &syndrom);
     message_to_data(&message)
 }
 
-fn data_to_message(data: &Vec<u8>) -> Vec<u8> {
+/// assumes that package length is exactly divisible by data_len
+pub fn add_parity_package(package: &[u8], data_len: usize) -> Vec<u8> {
+    let mut encoded = vec![];
+    let pckg_len = package.len();
+
+    for data_ptr in (0..pckg_len).step_by(data_len) {
+        let data_to_encode = &package[data_ptr..min(data_ptr + data_len, pckg_len)];
+
+        if data_to_encode.len() < data_len {
+            let mut data_to_encode = Vec::from(data_to_encode);
+            data_to_encode
+                .write_all(&vec![0; data_len - data_to_encode.len()])
+                .unwrap();
+
+            encoded.append(&mut add_parity(&data_to_encode));
+            continue;
+        }
+
+        encoded.append(&mut add_parity(data_to_encode));
+    }
+
+    encoded
+}
+
+pub fn remove_parity_package(package: &mut [u8], message_len: usize) -> Vec<u8> {
+    let mut decoded = vec![];
+    let pckg_len = package.len();
+
+    for msg_ptr in (0..pckg_len).step_by(message_len) {
+        let msg_to_decode = &mut package[msg_ptr..min(msg_ptr + message_len, pckg_len)];
+
+        decoded.append(&mut remove_parity(msg_to_decode));
+    }
+
+    decoded
+}
+
+fn data_to_message(data: &[u8]) -> Vec<u8> {
     let data_len = data.len();
-    let parity_bit_count = parity_bits_for_data(data_len);
+    let message_len = message_length(data_len);
 
     // composing message with data and parity bits
-    let mut message = vec![u8::MAX; data_len + parity_bit_count];
-    let message_len = message.len();
+    let mut message = vec![u8::MAX; message_len];
 
     let mut data_ptr = 0;
     for i in 0..message_len {
@@ -51,15 +89,15 @@ fn data_to_message(data: &Vec<u8>) -> Vec<u8> {
     message
 }
 
-fn message_to_data(message: &Vec<u8>) -> Vec<u8> {
+fn message_to_data(message: &[u8]) -> Vec<u8> {
     let message_len = message.len();
-    let parity_bit_count = parity_bits_in_message(message_len);
+    let data_len = data_length(message_len);
 
-    let mut data = vec![u8::MAX; message_len - parity_bit_count];
+    let mut data = vec![u8::MAX; data_len];
     let mut data_ptr = 0;
 
     // defining bits that should be omitted in resulting data
-    let mut pbit = parity_bit_count - 1;
+    let mut pbit = message_len - data_len - 1;
     let mut pbit_pos = message_len - 2_u32.pow(pbit as u32) as usize;
 
     for i in 0..message_len {
@@ -80,7 +118,7 @@ fn message_to_data(message: &Vec<u8>) -> Vec<u8> {
     data
 }
 
-fn check_for_erros(message: &Vec<u8>) -> Vec<u8> {
+fn check_for_erros(message: &[u8]) -> Vec<u8> {
     let mut syndrom: Vec<u8> = Vec::new();
     let message_len = message.len();
 
@@ -112,7 +150,7 @@ fn check_for_erros(message: &Vec<u8>) -> Vec<u8> {
     syndrom
 }
 
-fn correct_error(message: &mut Vec<u8>, syndrom: &Vec<u8>) {
+fn correct_error(message: &mut [u8], syndrom: &Vec<u8>) {
     if !syndrom.contains(&1) {
         return;
     }
@@ -134,20 +172,20 @@ fn correct_error(message: &mut Vec<u8>, syndrom: &Vec<u8>) {
     message[wrong_bit] = (1 + message[wrong_bit]) % 2;
 }
 
-fn parity_bits_for_data(data_len: usize) -> usize {
+pub fn message_length(data_len: usize) -> usize {
     let mut redundant_count = 0;
     while 1 << redundant_count < data_len + redundant_count + 1 {
         redundant_count += 1;
     }
 
-    redundant_count
+    redundant_count + data_len
 }
 
-pub fn parity_bits_in_message(message_len: usize) -> usize {
+pub fn data_length(message_len: usize) -> usize {
     let mut redundant_count = 0;
     while 1 << redundant_count < message_len + 1 {
         redundant_count += 1;
     }
 
-    redundant_count
+    message_len - redundant_count
 }

@@ -106,7 +106,7 @@ fn create_dictionary_header(
         file.write(&[bit_sequence.len() as u8])?;
 
         // get symbol's code and write it to file
-        bitmap.add_sequence(bit_sequence);
+        bitmap.add_bit_sequence(bit_sequence);
 
         if let Err(_) = bitmap.flush_to_file(file) {
             return Err(Error::new(ErrorKind::Other, write_error));
@@ -128,9 +128,10 @@ fn write_compressed_file(
     let mut bitmap = BitMap::new();
 
     if let Some(hmcl) = hamming_code_length {
-        let data_len = hamming::parity_bits_in_message(hmcl as usize);
+        let data_len = hamming::data_length(hmcl as usize);
+
         file_reader.read_file_in_chunks(|buf, end_of_file| {
-            transform_data_with_hamming_codes(
+            transform_data_to_hamming_codes(
                 output_file,
                 dictionary,
                 &mut bitmap,
@@ -148,7 +149,7 @@ fn write_compressed_file(
     Ok(())
 }
 
-fn transform_data_with_hamming_codes(
+fn transform_data_to_hamming_codes(
     output_file: &mut File,
     dictionary: &HashMap<u8, Vec<u8>>,
     bitmap: &mut BitMap,
@@ -159,17 +160,22 @@ fn transform_data_with_hamming_codes(
     let chunk_size = 1024;
     let buf_len = buf.len();
 
-    for i in (0..buf_len).step_by(chunk_size) {
-        let valid_bytes_chunk = &buf[i..min(i + chunk_size, buf_len)];
+    let mut data_container = BitMap::new();
+
+    for chunk_pos in (0..buf_len).step_by(chunk_size) {
+        let valid_bytes_chunk = &buf[chunk_pos..min(chunk_pos + chunk_size, buf_len)];
 
         for byte in valid_bytes_chunk {
             if dictionary.contains_key(byte) {
-                bitmap.add_sequence(dictionary.get(byte).unwrap());
+                data_container.add_bit_sequence(dictionary.get(byte).unwrap());
             }
         }
     }
 
-    // if bytes_read is same
+    let data_bits = data_container.get_all_bits();
+
+    bitmap.add_bit_sequence(&hamming::add_parity_package(&data_bits, data_len));
+
     if let Err(_) = if end_of_file {
         bitmap.flush_to_file(output_file)
     } else {
@@ -193,7 +199,7 @@ fn transofrm_data_to_raw(
 ) -> Result<(), Error> {
     for byte in buf {
         if dictionary.contains_key(byte) {
-            bitmap.add_sequence(dictionary.get(byte).unwrap());
+            bitmap.add_bit_sequence(dictionary.get(byte).unwrap());
         }
     }
 
@@ -241,17 +247,22 @@ pub fn decode_file(file_info: Option<FileInfo>) -> Result<(), Error> {
         Err(_) => return Err(Error::new(ErrorKind::Other, "Could not create output file")),
     };
 
-    let mut dictionary: HashMap<Vec<bool>, u8> = HashMap::new();
+    let mut dictionary: HashMap<Vec<u8>, u8> = HashMap::new();
 
     // actual algorithm of decoding starts here
     let (header_offset, hamming_code_len) = read_dictionary_header(&encoded_file, &mut dictionary);
 
     let mut file_reader = FileReader::new(encoded_file);
+    let trie = build_codes_trie(&dictionary);
     file_reader.set_offset(header_offset);
 
-    let trie = build_codes_trie(&dictionary);
-
-    match write_decoded_file(&mut file_reader, &mut decoded_file, &trie, &dictionary) {
+    match write_decoded_file(
+        &mut file_reader,
+        &mut decoded_file,
+        &trie,
+        &dictionary,
+        hamming_code_len,
+    ) {
         Ok(_) => {
             println!("Decompressing completed successfully!");
             Ok(())
@@ -260,10 +271,7 @@ pub fn decode_file(file_info: Option<FileInfo>) -> Result<(), Error> {
     }
 }
 
-fn read_dictionary_header(
-    file: &File,
-    dict: &mut HashMap<Vec<bool>, u8>,
-) -> (usize, Option<usize>) {
+fn read_dictionary_header(file: &File, dict: &mut HashMap<Vec<u8>, u8>) -> (usize, Option<usize>) {
     let mut buf = [0_u8; 2048]; // 2Kb buffer
     let mut offset = 0;
     file.read_at(&mut buf, 0).unwrap();
@@ -271,10 +279,12 @@ fn read_dictionary_header(
     let mut bitmap = BitMap::new();
 
     let hamming_code_len = if &buf[..HAMMING_CODE_LENGTH_KEY.len()] == HAMMING_CODE_LENGTH_KEY {
+        offset += HAMMING_CODE_LENGTH_KEY.len() + 1;
         Some(buf[HAMMING_CODE_LENGTH_KEY.len()] as usize)
     } else {
         None
     };
+
     // reading dictionary from header of the file
     while &buf[offset..=offset + 1] != DICTIONARY_END {
         // get original symbol code
@@ -300,7 +310,7 @@ fn read_dictionary_header(
     (offset, hamming_code_len)
 }
 
-fn build_codes_trie(dict: &HashMap<Vec<bool>, u8>) -> Trie<bool> {
+fn build_codes_trie(dict: &HashMap<Vec<u8>, u8>) -> Trie<u8> {
     let mut builder = trie_rs::TrieBuilder::new();
     for code in dict.keys() {
         builder.push(code);
@@ -312,18 +322,19 @@ fn build_codes_trie(dict: &HashMap<Vec<bool>, u8>) -> Trie<bool> {
 fn write_decoded_file(
     file_reader: &mut FileReader,
     decoded_file: &mut File,
-    trie: &Trie<bool>,
-    dictionary: &HashMap<Vec<bool>, u8>,
+    trie: &Trie<u8>,
+    dictionary: &HashMap<Vec<u8>, u8>,
+    hamming_code_length: Option<usize>,
 ) -> Result<(), Error> {
     let write_error = "Could not parse directory into file";
 
     let mut bitmap = BitMap::new();
 
-    let chunk_length = 102_400;
+    let chunk_length = 1024;
     let mut chunk_start = 0;
-    let mut decoded_bytes = Vec::new();
 
-    let mut bit_stream = Vec::new();
+    let mut decoded_bit_stream = Vec::new();
+    let mut connecting_bits = Vec::new();
 
     file_reader.read_file_in_chunks(|buf, _| {
         let buf_len = buf.len();
@@ -331,22 +342,41 @@ fn write_decoded_file(
             let bytes_chunk = &buf[chunk_start..min(chunk_start + chunk_length, buf_len)];
             bitmap.add_bytes(bytes_chunk);
 
-            bit_stream.append(&mut bitmap.get_all_bits());
+            // if hamming codes are used
+            if let Some(msg_len) = hamming_code_length {
+                let mut bits = Vec::from(&connecting_bits[..]);
+                bits.append(&mut bitmap.get_all_bits());
+
+                let connection_pos = bits.len() - bits.len() % msg_len;
+
+                for b in &bits[connection_pos..] {
+                    connecting_bits.push(b.clone());
+                }
+
+                bitmap.clear();
+                bitmap.add_bit_sequence(&mut hamming::remove_parity_package(
+                    &mut bits[..connection_pos],
+                    msg_len,
+                ));
+            }
+
+            decoded_bit_stream.append(&mut bitmap.get_all_bits());
             bitmap.clear();
 
-            let length = bit_stream.len();
+            let mut decoded_bytes = Vec::new();
+            let length = decoded_bit_stream.len();
 
             let mut ptr_lo = 0;
             let mut ptr_hi = 1;
             while ptr_hi < length {
-                while !trie.exact_match(&bit_stream[ptr_lo..ptr_hi]) && ptr_hi < length {
+                while !trie.exact_match(&decoded_bit_stream[ptr_lo..ptr_hi]) && ptr_hi < length {
                     ptr_hi += 1;
                 }
                 if ptr_hi >= length {
                     break;
                 }
 
-                decoded_bytes.push(*dictionary.get(&bit_stream[ptr_lo..ptr_hi]).unwrap());
+                decoded_bytes.push(*dictionary.get(&decoded_bit_stream[ptr_lo..ptr_hi]).unwrap());
 
                 ptr_lo = ptr_hi;
                 ptr_hi += 1;
@@ -356,9 +386,7 @@ fn write_decoded_file(
                 return Err(Error::new(ErrorKind::Other, write_error));
             };
 
-            decoded_bytes.clear();
-
-            bit_stream = Vec::from(&bit_stream[ptr_lo..]);
+            decoded_bit_stream = Vec::from(&decoded_bit_stream[ptr_lo..]);
             chunk_start += chunk_length;
         }
 

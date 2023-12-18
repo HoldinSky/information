@@ -145,27 +145,34 @@ fn choose_hamming_code_length() -> Result<Option<u8>, Error> {
 
     loop {
         clear();
-        println!("Input size of whole hamming code (7 - 255");
+        println!("Input size for hamming code (7 - 255)");
         let input = get_line_from_user();
+        let input = input.trim();
 
         match input.parse::<u8>() {
-            Ok(ham_code_lenght) => return Ok(Some(ham_code_lenght)),
-            Err(err) => pause(format!("{}", err).as_str()),
+            Ok(ham_code_lenght) => {
+                if ham_code_lenght >= 7 {
+                    return Ok(Some(ham_code_lenght));
+                } else {
+                    pause("Code length must be in range of 7 - 255. Press any key...")
+                }
+            }
+            Err(err) => pause(format!("{}. Press any key...", err).as_str()),
         }
     }
 }
 
 fn ask_use_hamming_code() -> Result<bool, Error> {
-    println!("Use hamming codes to compress data? (y/n)");
+    loop {
+        println!("Use hamming codes to compress data? (y/n)");
 
-    let ans = get_line_from_user().to_lowercase();
+        let ans = get_line_from_user().to_lowercase();
+        let ans = ans.trim();
 
-    if ans != "y" && ans != "n" {
-        Err(Error::new(
-            ErrorKind::InvalidInput,
-            "Failed to parse the input.",
-        ))
-    } else {
-        Ok(ans == "y")
+        if ans != "y" && ans != "n" {
+            println!("Failed to parse the input.");
+        } else {
+            return Ok(ans == "y");
+        }
     }
 }

@@ -25,7 +25,7 @@ impl BitMap {
         }
     }
 
-    pub fn add_sequence(&mut self, code: &Vec<u8>) {
+    pub fn add_bit_sequence(&mut self, code: &Vec<u8>) {
         for bit in code {
             self.add_bit(*bit);
         }
@@ -85,23 +85,26 @@ impl BitMap {
         }
     }
 
-    pub fn get_all_bits(&self) -> Vec<bool> {
+    /// returns array of bits (1 0)
+    pub fn get_all_bits(&self) -> Vec<u8> {
         let mut bits = vec![];
+
         for byte in &self.byte_buffer {
             for i in 0..8 {
-                bits.push((byte & (1 << i)) != 0);
+                bits.push(if byte & (1 << i) == 0 { 0 } else { 1 });
             }
         }
 
         bits
     }
 
-    pub fn get_bits(&self, count: usize) -> Vec<bool> {
+    pub fn get_bits(&self, count: usize) -> Vec<u8> {
         let mut bits = vec![];
         let mut count = count;
+
         for byte in &self.byte_buffer {
             for i in 0..8 {
-                bits.push((byte & (1 << i)) != 0);
+                bits.push(if byte & (1 << i) == 0 { 0 } else { 1 });
                 count -= 1;
 
                 if count == 0 {
@@ -158,7 +161,7 @@ impl Display for BitMap {
 
         let mut byte_cutter = 0;
         for bit in self.get_all_bits() {
-            repr.push(if bit { '1' } else { '0' });
+            repr.push(if bit == 1 { '1' } else { '0' });
 
             byte_cutter += 1;
 
